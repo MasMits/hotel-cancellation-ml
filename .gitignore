@@ -1,0 +1,10 @@
+.venv/
+.idea/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.DS_Store
+data/
+*.egg-info/
+build/
+.ruff_cache/
