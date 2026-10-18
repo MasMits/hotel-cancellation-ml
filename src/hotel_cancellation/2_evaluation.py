@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import pandas as pd
 from sklearn.metrics import (
     ConfusionMatrixDisplay,
     RocCurveDisplay,
@@ -7,6 +8,7 @@ from sklearn.metrics import (
     log_loss,
     precision_score,
     recall_score,
+    roc_auc_score,
 )
 
 
@@ -41,4 +43,29 @@ def plot_roc_curve(model, X, y, title="ROC curve"):
     plt.plot([0, 1], [0, 1], "k--", label="Random guess (AUC = 0.5)")
     plt.legend()
     plt.title(title)
+    plt.show()
+
+
+def compare_models(models, X_train, y_train, X_test, y_test):
+    """Return one row per model: test metrics, ROC AUC and the train/test error gap."""
+    rows = {}
+    for name, model in models.items():
+        test = get_metrics(model, X_test, y_test)
+        train = get_metrics(model, X_train, y_train)
+        test["roc_auc"] = roc_auc_score(y_test, model.predict_proba(X_test)[:, 1])
+        test["train_error_rate"] = train["error_rate"]
+        test["gap (test - train error)"] = test["error_rate"] - train["error_rate"]
+        rows[name] = test
+
+    return pd.DataFrame(rows).T
+
+
+def plot_roc_curves(models, X, y, title="ROC curves"):
+    """Draw the ROC curves of several models on one plot."""
+    _, ax = plt.subplots(figsize=(6, 6))
+    for name, model in models.items():
+        RocCurveDisplay.from_estimator(model, X, y, name=name, ax=ax)
+    ax.plot([0, 1], [0, 1], "k--", label="Random guess (AUC = 0.5)")
+    ax.legend()
+    ax.set_title(title)
     plt.show()
