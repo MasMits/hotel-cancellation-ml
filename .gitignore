@@ -8,3 +8,6 @@ data/
 *.egg-info/
 build/
 .ruff_cache/
+
+reports/
+models/
