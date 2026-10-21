@@ -3,3 +3,4 @@ scikit-learn
 matplotlib
 jupyterlab
 ipykernel
+jupytext==1.19.6

@@ -34,6 +34,28 @@ Select the **Python (hotel-cancellation)** kernel. In PyCharm, use
 The first notebook cell adds `src` to the import path, so no package installation
 is needed. Python 3.10 or newer is required.
 
+## 4. Review and sync the notebook
+
+`notebook/project.ipynb` is paired with `notebook/project.py` using Jupytext.
+The `.py` file contains every code cell and Markdown cell (as comments), separated
+by `# %%` markers. Use it for line comments in GitHub pull requests. Outputs and
+plots remain in the `.ipynb` file.
+
+After editing either file, save and close the editor, then run:
+
+```bash
+python -m jupytext --sync notebook/project.ipynb
+```
+
+Sync uses the most recently modified file for cell contents and keeps notebook
+outputs where possible. Sync before switching which file you edit; editing both
+independently before syncing can overwrite changes. Reopen and rerun affected
+cells after code changes, because retained outputs may be outdated.
+
+Commit both files together. When Jupytext is loaded by JupyterLab, saving the
+notebook also updates its text pair; restart JupyterLab after installing it.
+In PyCharm, use the sync command explicitly.
+
 - `0_preprocessing.py`: load data, prepare features, define transformations.
 - `1_modeling.py`: placeholder for the model pipeline.
 - `2_evaluation.py`: placeholder for metrics.
