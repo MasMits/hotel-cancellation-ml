@@ -5,9 +5,9 @@ import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer, make_column_selector
 from sklearn.impute import SimpleImputer
-from sklearn.model_selection import GroupShuffleSplit
+from sklearn.model_selection import GroupShuffleSplit, StratifiedGroupKFold
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
 from sklearn.utils.validation import check_is_fitted
 
 DATA_PATH = Path(__file__).resolve().parents[2] / "data/raw/hotel_bookings.csv"
@@ -48,10 +48,28 @@ def prepare_features(df):
     return features, target
 
 
+def booking_groups(features):
+    """Feature-only key shared by the outer split, CV and cluster bootstrap."""
+    return pd.util.hash_pandas_object(
+        features.drop(columns=GROUPING_EXCLUDED_COLUMNS), index=False,
+    )
+
+
+def grouped_cv(features, target, n_splits=3, random_state=72):
+    """Materialize common folds once, after choosing the training row order."""
+    groups = booking_groups(features)
+    splitter = StratifiedGroupKFold(
+        n_splits=n_splits, shuffle=True, random_state=random_state,
+    )
+    folds = list(splitter.split(features, target, groups))
+    for train_rows, validation_rows in folds:
+        assert set(groups.iloc[train_rows]).isdisjoint(groups.iloc[validation_rows])
+    return folds
+
+
 def split_data(features, target, random_state=72):
     """Return train/validation/test pairs, keeping identical feature groups together."""
-    group_features = features.drop(columns=GROUPING_EXCLUDED_COLUMNS)
-    groups = pd.util.hash_pandas_object(group_features, index=False)
+    groups = booking_groups(features)
 
     test_splitter = GroupShuffleSplit(
         n_splits=1, test_size=0.20, random_state=random_state,
@@ -109,7 +127,7 @@ class RareCategoryGrouper(TransformerMixin, BaseEstimator):
 
         for column in ["agent", "company", "country"]:
             counts = X[column].fillna("Unknown").value_counts()
-            frequent = set(counts[counts >= self.min_count].index)
+            frequent = set(counts.index if self.min_count is None else counts[counts >= self.min_count].index)
             # Missing values stay separate, even if they are rare in train.
             frequent.add("Unknown")
             self.frequent_categories_[column] = frequent
@@ -132,16 +150,19 @@ class RareCategoryGrouper(TransformerMixin, BaseEstimator):
         return self.feature_names_in_.copy()
 
 
-def build_preprocessor(rare_min_count=None):
+def build_preprocessor(rare_min_count=None, log_lead=False):
     """Build separate numerical and categorical pipelines, fitted by the model."""
-    numeric_steps = [
+    numeric_steps = []
+    if log_lead:
+        numeric_steps.append(("log_lead", FunctionTransformer(
+            log_lead_time, validate=False, feature_names_out="one-to-one",
+        )))
+    numeric_steps.extend([
         ("imputer", SimpleImputer(strategy="median")),
         ("scaler", StandardScaler()),
-    ]
+    ])
 
-    categorical_steps = []
-    if rare_min_count is not None:
-        categorical_steps.append(("rare_categories", RareCategoryGrouper(rare_min_count)))
+    categorical_steps = [("rare_categories", RareCategoryGrouper(rare_min_count))]
     categorical_steps.extend([
         ("imputer", SimpleImputer(strategy="constant", fill_value="Unknown")),
         ("encoder", OneHotEncoder(handle_unknown="ignore")),

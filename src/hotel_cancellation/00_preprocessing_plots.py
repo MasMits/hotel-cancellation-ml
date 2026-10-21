@@ -7,46 +7,9 @@ import numpy as np
 import pandas as pd
 
 
-PRIMARY = "#C64BAD"
-BLUE = "#587FB6"
-GREEN = "#29A81E"
-TEXT = "#F2F8F1"
-MUTED = "#B8CCB8"
-PREVIEW_BACKGROUND = "#17151D"
-
-SLIDE_STYLE = {
-    "font.family": "DejaVu Sans",
-    "font.size": 12,
-    "axes.titlesize": 21,
-    "axes.titleweight": "bold",
-    "axes.titlepad": 18,
-    "axes.labelpad": 12,
-    "text.color": TEXT,
-    "axes.labelcolor": MUTED,
-    "axes.edgecolor": MUTED,
-    "xtick.color": MUTED,
-    "ytick.color": MUTED,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "axes.spines.left": False,
-    "axes.spines.bottom": False,
-    "axes.grid": False,
-    "figure.facecolor": "none",
-    "axes.facecolor": "none",
-    "legend.facecolor": "none",
-    "legend.edgecolor": "none",
-    "legend.labelcolor": TEXT,
-}
-
-
-def style_axis(axis):
-    """Use the slide style without changing other figures in the notebook."""
-    title = axis.get_title()
-    axis.set_title("")
-    axis.set_title(title, loc="left")
-    axis.grid(False, axis="both", which="both")
-    axis.set_axisbelow(True)
-    axis.tick_params(length=0, pad=9)
+from hotel_cancellation.plot_style import (
+    BLUE, GREEN, MUTED, PRIMARY, SLIDE_STYLE, style_axis,
+)
 
 
 def plot_class_balance(train_bookings):
@@ -148,13 +111,3 @@ def plot_experiment_results(results_table):
             style_axis(axis)
         figure.tight_layout()
         return figure
-
-
-def save_figure(figure, path):
-    """Save transparent PNG/SVG for slides and a dark PNG preview for the report."""
-    figure.savefig(f"{path}.png", dpi=220, transparent=True, bbox_inches="tight", pad_inches=0.25)
-    figure.savefig(f"{path}.svg", transparent=True, bbox_inches="tight", pad_inches=0.25)
-    figure.savefig(
-        f"{path}_preview.png", dpi=160, facecolor=PREVIEW_BACKGROUND,
-        transparent=False, bbox_inches="tight", pad_inches=0.25,
-    )

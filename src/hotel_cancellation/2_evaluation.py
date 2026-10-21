@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from hotel_cancellation import plot_style as style
 from sklearn.calibration import calibration_curve
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import (
@@ -8,6 +9,7 @@ from sklearn.metrics import (
     PrecisionRecallDisplay,
     RocCurveDisplay,
     accuracy_score,
+    average_precision_score,
     brier_score_loss,
     f1_score,
     log_loss,
@@ -20,7 +22,7 @@ from sklearn.metrics import (
 def get_metrics(model, X, y):
     """Return the main classification metrics of a model on one dataset."""
     y_pred = model.predict(X)
-    y_proba = model.predict_proba(X)[:, 1]  # probability of "canceled"
+    y_proba = model.predict_proba(X)[:, 1]
 
     return {
         "accuracy": accuracy_score(y, y_pred),
@@ -32,23 +34,29 @@ def get_metrics(model, X, y):
     }
 
 
-def plot_confusion_matrix(model, X, y, title="Confusion matrix"):
-    ConfusionMatrixDisplay.from_estimator(
-        model, X, y,
+@style.themed
+def plot_confusion_matrix(model, X, y, title="Confusion matrix", threshold=None):
+    prediction = model.predict(X) if threshold is None else (model.predict_proba(X)[:, 1] >= threshold).astype(int)
+    display = ConfusionMatrixDisplay.from_predictions(
+        y, prediction,
         display_labels=["Not canceled", "Canceled"],
-        cmap="Purples",
+        cmap=style.HEATMAP,
         colorbar=False,
     )
+    for value, label in zip(display.confusion_matrix.flat, display.text_.flat):
+        red, green, blue, _ = display.im_.cmap(display.im_.norm(value))
+        label.set_color("white" if .2126 * red + .7152 * green + .0722 * blue < .5 else style.TEXT)
     plt.title(title)
-    plt.show()
+    style.show_figure(plt.gcf(), "confusion_matrix")
 
 
+@style.themed
 def plot_roc_curve(model, X, y, title="ROC curve"):
     RocCurveDisplay.from_estimator(model, X, y, name="Logistic regression")
-    plt.plot([0, 1], [0, 1], "k--", label="Random guess (AUC = 0.5)")
+    plt.plot([0, 1], [0, 1], color=style.MUTED, linestyle="--", label="Random guess (AUC = 0.5)")
     plt.legend()
     plt.title(title)
-    plt.show()
+    style.show_figure(plt.gcf(), "roc_curve")
 
 
 def compare_models(models, X_train, y_train, X_eval, y_eval):
@@ -65,27 +73,30 @@ def compare_models(models, X_train, y_train, X_eval, y_eval):
     return pd.DataFrame(rows).T
 
 
+@style.themed
 def plot_roc_curves(models, X, y, title="ROC curves"):
     """Draw the ROC curves of several models on one plot."""
-    _, ax = plt.subplots(figsize=(6, 6))
+    _, ax = plt.subplots(figsize=(9, 7))
     for name, model in models.items():
         RocCurveDisplay.from_estimator(model, X, y, name=name, ax=ax)
-    ax.plot([0, 1], [0, 1], "k--", label="Random guess (AUC = 0.5)")
+    ax.plot([0, 1], [0, 1], color=style.MUTED, linestyle="--", label="Random guess (AUC = 0.5)")
     ax.legend()
     ax.set_title(title)
-    plt.show()
+    style.show_figure(plt.gcf(), "roc_curves")
 
 
-def metrics_from_proba(y, y_proba, threshold=0.5):
+def metrics_from_proba(y, y_proba, threshold=0.5, sample_weight=None):
     """Return the main metrics when bookings with probability >= threshold are flagged as canceled."""
     y_pred = (np.asarray(y_proba) >= threshold).astype(int)
     return {
-        "accuracy": accuracy_score(y, y_pred),
-        "precision": precision_score(y, y_pred, zero_division=0),
-        "recall": recall_score(y, y_pred),
-        "f1": f1_score(y, y_pred),
-        "roc_auc": roc_auc_score(y, y_proba),
-        "brier": brier_score_loss(y, y_proba),
+        "accuracy": accuracy_score(y, y_pred, sample_weight=sample_weight),
+        "precision": precision_score(y, y_pred, zero_division=0, sample_weight=sample_weight),
+        "recall": recall_score(y, y_pred, zero_division=0, sample_weight=sample_weight),
+        "f1": f1_score(y, y_pred, zero_division=0, sample_weight=sample_weight),
+        "roc_auc": roc_auc_score(y, y_proba, sample_weight=sample_weight),
+        "average_precision": average_precision_score(y, y_proba, sample_weight=sample_weight),
+        "brier": brier_score_loss(y, y_proba, sample_weight=sample_weight),
+        "log_loss": log_loss(y, y_proba, sample_weight=sample_weight, labels=[0, 1]),
     }
 
 
@@ -96,20 +107,20 @@ def compare_proba(probas, y, threshold=0.5):
     ).T
 
 
+@style.themed
 def plot_roc_pr_curves(probas, y, title=""):
     """ROC curve (left) and precision-recall curve (right) for every column of a probability table."""
-    _, (ax_roc, ax_pr) = plt.subplots(1, 2, figsize=(12, 5))
+    _, (ax_roc, ax_pr) = plt.subplots(1, 2, figsize=(15, 6))
     for name in probas.columns:
         RocCurveDisplay.from_predictions(y, probas[name], name=name, ax=ax_roc)
         PrecisionRecallDisplay.from_predictions(y, probas[name], name=name, ax=ax_pr)
-    ax_roc.plot([0, 1], [0, 1], "k--", label="Random guess (AUC = 0.5)")
-    ax_pr.axhline(y.mean(), color="k", linestyle="--", label=f"Random guess (AP = {y.mean():.2f})")
+    ax_roc.plot([0, 1], [0, 1], color=style.MUTED, linestyle="--", label="Random guess (AUC = 0.5)")
+    ax_pr.axhline(y.mean(), color=style.MUTED, linestyle="--", label=f"Random guess (AP = {y.mean():.2f})")
     ax_roc.legend()
     ax_pr.legend()
     ax_roc.set_title(f"ROC curve {title}")
     ax_pr.set_title(f"Precision-recall curve {title}")
-    plt.tight_layout()
-    plt.show()
+    style.show_figure(plt.gcf(), "roc_pr_curves")
 
 
 def threshold_table(y, y_proba, thresholds=None):
@@ -130,46 +141,64 @@ def threshold_table(y, y_proba, thresholds=None):
     return pd.DataFrame(rows).set_index("threshold")
 
 
+@style.themed
 def plot_threshold_curves(table, marked=None, title="Metrics against threshold"):
     """Plot precision, recall and F1 against the threshold, with chosen thresholds as vertical lines."""
-    _, ax = plt.subplots(figsize=(8, 5))
+    _, ax = plt.subplots(figsize=(11, 6))
     table[["precision", "recall", "f1"]].plot(ax=ax)
     for label, threshold in (marked or {}).items():
-        ax.axvline(threshold, color="grey", linestyle="--")
-        ax.text(threshold, 0.02, f" {label} = {threshold:.2f}", rotation=90, va="bottom")
+        ax.axvline(threshold, color=style.MUTED, linestyle="--")
+        ax.text(threshold, 0.04, f" {label} = {threshold:.2f}", rotation=90, va="bottom", color=style.TEXT, fontsize=10)
     ax.set_xlabel("Threshold (flag as canceled if probability >= threshold)")
     ax.set_ylim(0, 1)
     ax.set_title(title)
-    plt.show()
+    style.show_figure(plt.gcf(), "threshold_curves")
 
 
+@style.themed
 def plot_calibration(probas, y, n_bins=10, title="Calibration"):
     """Reliability diagram: predicted probability against the observed share of cancellations."""
-    _, ax = plt.subplots(figsize=(6, 6))
+    _, ax = plt.subplots(figsize=(9, 7))
     for name in probas.columns:
         observed, predicted = calibration_curve(y, probas[name], n_bins=n_bins)
         brier = brier_score_loss(y, probas[name])
         ax.plot(predicted, observed, "o-", label=f"{name} (Brier = {brier:.3f})")
-    ax.plot([0, 1], [0, 1], "k--", label="Perfectly calibrated")
+    ax.plot([0, 1], [0, 1], color=style.MUTED, linestyle="--", label="Perfectly calibrated")
     ax.set_xlabel("Predicted probability of cancellation")
     ax.set_ylabel("Observed share of cancellations")
     ax.set_title(title)
     ax.legend()
-    plt.show()
+    style.show_figure(plt.gcf(), "calibration")
 
 
-def bootstrap_metrics(y, y_proba, threshold=0.5, n_boot=1000, random_state=72):
-    """Point estimate and 95% bootstrap confidence interval of each metric.
+def _bootstrap_weights(y, groups, n_boot, random_state):
+    """Resample whole groups; weights exactly represent repeated group draws."""
+    if groups is None:
+        groups = np.arange(len(y))
+    if len(groups) != len(y):
+        raise ValueError("groups and y must have the same length and row order")
+    _, codes = np.unique(np.asarray(groups), return_inverse=True)
+    n_groups = codes.max() + 1
+    rng = np.random.default_rng(random_state)
+    for _ in range(n_boot):
+        # A retry is needed only when a draw contains a single outcome class.
+        for attempt in range(100):
+            draws = rng.integers(0, n_groups, n_groups)
+            weights = np.bincount(draws, minlength=n_groups)[codes]
+            if np.unique(y[weights > 0]).size == 2:
+                yield weights
+                break
+        else:
+            raise ValueError("Unable to draw a bootstrap sample with both classes")
 
-    The test set is resampled with replacement n_boot times; the model is not retrained.
-    """
+
+def bootstrap_metrics(y, y_proba, threshold=0.5, n_boot=1000, random_state=72, groups=None):
+    """Percentile CIs for a fixed model; resample whole groups when supplied."""
     y = np.asarray(y)
     y_proba = np.asarray(y_proba)
-    rng = np.random.default_rng(random_state)
     samples = []
-    for _ in range(n_boot):
-        rows = rng.integers(0, len(y), len(y))
-        samples.append(metrics_from_proba(y[rows], y_proba[rows], threshold))
+    for weights in _bootstrap_weights(y, groups, n_boot, random_state):
+        samples.append(metrics_from_proba(y, y_proba, threshold, sample_weight=weights))
     samples = pd.DataFrame(samples)
 
     return pd.DataFrame({
@@ -179,30 +208,66 @@ def bootstrap_metrics(y, y_proba, threshold=0.5, n_boot=1000, random_state=72):
     })
 
 
-def bootstrap_auc_difference(y, proba_a, proba_b, n_boot=1000, random_state=72):
-    """Bootstrap distribution of AUC(a) - AUC(b), both models scored on the same resampled rows."""
+def bootstrap_auc_difference(y, proba_a, proba_b, n_boot=1000, random_state=72, groups=None):
+    """Paired AUC difference on identical resampled groups for fixed models."""
     y = np.asarray(y)
     proba_a = np.asarray(proba_a)
     proba_b = np.asarray(proba_b)
-    rng = np.random.default_rng(random_state)
     differences = []
-    for _ in range(n_boot):
-        rows = rng.integers(0, len(y), len(y))
-        differences.append(roc_auc_score(y[rows], proba_a[rows]) - roc_auc_score(y[rows], proba_b[rows]))
+    for weights in _bootstrap_weights(y, groups, n_boot, random_state):
+        differences.append(
+            roc_auc_score(y, proba_a, sample_weight=weights)
+            - roc_auc_score(y, proba_b, sample_weight=weights)
+        )
     return np.array(differences)
 
 
+def contact_workload(y, y_proba, shares=(0.1, 0.2, 0.3, 0.4, 0.5)):
+    """Rank by risk and evaluate illustrative contact budgets, not business targets.
+
+    Stable input order breaks equal-score ties without looking at outcomes.
+    """
+    y = np.asarray(y)
+    proba = np.asarray(y_proba)
+    ranking = np.argsort(-proba, kind="stable")
+    rows = []
+    for share in shares:
+        if not 0 < share <= 1:
+            raise ValueError("Contact shares must be in (0, 1]")
+        n_contacts = int(np.ceil(len(y) * share))
+        captured = int(y[ranking[:n_contacts]].sum())
+        rows.append({
+            "contact_share": n_contacts / len(y), "contacts": n_contacts,
+            "cancellations_found": captured, "unnecessary_contacts": n_contacts - captured,
+            "precision": captured / n_contacts,
+            "recall": captured / y.sum() if y.sum() else 0.0,
+        })
+    return pd.DataFrame(rows)
+
+
+def calibration_bins(y, y_proba, n_bins=10):
+    """Reliability estimates with bin counts; no claim of universal calibration."""
+    table = pd.DataFrame({"outcome": np.asarray(y), "predicted": np.asarray(y_proba)})
+    table["bin"] = pd.cut(table.predicted, np.linspace(0, 1, n_bins + 1), include_lowest=True)
+    return table.groupby("bin", observed=True).agg(
+        bookings=("outcome", "size"), predicted=("predicted", "mean"),
+        observed=("outcome", "mean"),
+    )
+
+
+@style.themed
 def plot_bootstrap_difference(differences, label="AUC difference"):
     """Histogram of a bootstrap distribution with its 95% interval and zero marked."""
     low, high = np.quantile(differences, [0.025, 0.975])
     _, ax = plt.subplots(figsize=(8, 4))
-    ax.hist(differences, bins=40, color="tab:purple", alpha=0.7)
-    ax.axvline(0, color="k", linestyle="--", label="No difference")
-    ax.axvspan(low, high, color="grey", alpha=0.2, label=f"95% interval [{low:.4f}, {high:.4f}]")
+    ax.hist(differences, bins=40, color=style.PRIMARY, alpha=0.7)
+    ax.axvline(0, color=style.MUTED, linestyle="--", label="No difference")
+    ax.axvspan(low, high, color=style.BLUE, alpha=0.25, label=f"95% interval [{low:.4f}, {high:.4f}]")
+    ax.set_title("Paired bootstrap comparison")
     ax.set_xlabel(label)
     ax.set_ylabel("Bootstrap samples")
     ax.legend()
-    plt.show()
+    style.show_figure(plt.gcf(), "bootstrap_difference")
 
 
 def metrics_by_segment(X, y, y_proba, column, threshold=0.5, min_rows=200):
@@ -226,22 +291,23 @@ def metrics_by_segment(X, y, y_proba, column, threshold=0.5, min_rows=200):
     return pd.DataFrame(rows).set_index("segment").sort_values("bookings", ascending=False)
 
 
+@style.themed
 def plot_segment_recall(tables, overall_recall):
     """Horizontal bars of recall per segment, one panel per column."""
     _, axes = plt.subplots(1, len(tables), figsize=(5 * len(tables), 4))
     axes = np.atleast_1d(axes)
     for ax, (column, table) in zip(axes, tables.items()):
-        table["recall"].sort_values().plot.barh(ax=ax, color="tab:purple")
-        ax.axvline(overall_recall, color="k", linestyle="--", label="Overall recall")
+        table["recall"].sort_values().plot.barh(ax=ax, color=style.PRIMARY)
+        ax.axvline(overall_recall, color=style.MUTED, linestyle="--", label="Overall recall")
         ax.set_xlim(0, 1)
-        ax.set_title(column)
+        ax.set_title(column.replace("_", " ").capitalize())
         ax.set_xlabel("Recall")
         ax.set_ylabel("")
-    axes[0].legend(loc="lower right")
-    plt.tight_layout()
-    plt.show()
+    axes[0].legend(loc="upper left", bbox_to_anchor=(0, -0.25), ncol=2)
+    style.show_figure(plt.gcf(), "segment_recall")
 
 
+@style.themed
 def plot_permutation_importance(model, X, y, n_repeats=5, top=15, sample=5000, random_state=72):
     """Drop in ROC AUC when one original column is shuffled, measured on (a sample of) the given data."""
     if sample is not None and len(X) > sample:
@@ -249,7 +315,7 @@ def plot_permutation_importance(model, X, y, n_repeats=5, top=15, sample=5000, r
         y = y.loc[X.index]
     result = permutation_importance(
         model, X, y, scoring="roc_auc", n_repeats=n_repeats,
-        random_state=random_state, n_jobs=-1,
+        random_state=random_state, n_jobs=1,
     )
     importance = pd.DataFrame(
         {"mean": result.importances_mean, "std": result.importances_std},
@@ -257,8 +323,8 @@ def plot_permutation_importance(model, X, y, n_repeats=5, top=15, sample=5000, r
     ).sort_values("mean", ascending=False).head(top)
 
     _, ax = plt.subplots(figsize=(8, 6))
-    importance["mean"][::-1].plot.barh(ax=ax, xerr=importance["std"][::-1], color="tab:purple")
+    importance["mean"][::-1].plot.barh(ax=ax, xerr=importance["std"][::-1], color=style.PRIMARY, ecolor=style.MUTED)
     ax.set_xlabel("Drop in ROC AUC when the column is shuffled")
     ax.set_title(f"Permutation importance (top {top})")
-    plt.show()
+    style.show_figure(plt.gcf(), "permutation_importance")
     return importance
