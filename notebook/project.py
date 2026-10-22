@@ -24,24 +24,40 @@
 # %% [markdown]
 # ## 0. Frame the problem
 #
-# We estimate the probability that a historical booking was canceled (`is_canceled = 1`). This is supervised binary classification on records from two hotels, with arrivals in 2015–2017.
+# **Goal.** 37% of bookings are canceled, and a late cancellation can leave a room empty. We predict which bookings will be canceled so a manager can call the riskiest guests first.
 #
-# The possible business use is a ranked list for a manager to call guests and confirm their plans. Higher recall finds more eventual cancellations, but contacting more guests also creates unnecessary calls. Because no staffing capacity or cost estimates are supplied, we report recall and precision at several contact budgets because no operational precision target is available. These are retrospective scenarios: the data cannot establish whether a call would prevent cancellation.
+# **Today.** Hotels overbook by a fixed rate and ask for non-refundable deposits. By hand, a manager would flag bookings made far in advance, through online agents, or without special requests. Similar problems are airline no-show prediction and customer churn, usually solved with tree models on tabular data.
 #
-# **Scope.** Booking-time snapshots of all fields are unavailable. This study compares historical associations; it does not validate a system that can be deployed at booking creation.
+# **Framing.** Supervised binary classification (`is_canceled`), batch learning on bookings from two Portuguese hotels, 2015–2017.
 #
-# **Protocol.** Tune and compare probability ranking using ROC AUC, with average precision, Brier score and log loss as complementary measures. Choose the model on validation. Use validation F1 to set a reproducible reference threshold, not a business optimum. Report final test metrics only after these choices. A constant training-prior model provides the trivial reference.
+# **Metric.** ROC AUC, because the model is used to rank bookings. Since we don't know how many calls the hotel can make, we show recall and precision for several call budgets (§3.4). Minimum: clearly better than always predicting the majority class (AUC 0.5) and than logistic regression.
+#
+# **Assumptions and how we checked them:**
+# - Identical bookings must stay in the same split. Done: no overlap between splits or CV folds (§1.0).
+# - Fields filled in after booking, like the assigned room, don't drive the result. Holds: without them, validation ROC AUC only drops from 0.946 to 0.941 (§3.8.2).
+# - 2015–2016 patterns still hold in 2017. Only partly: a model trained on earlier bookings reaches ROC AUC 0.866 on 2017, so in practice the model should be retrained regularly on recent bookings (§3.9).
 
 # %% [markdown]
-# ### Related work and our contribution
+# ### State of the art
 #
-# | Source | Approach and evidence | Relevance and comparison limits |
+# Data: [Hotel Booking Demand on Kaggle](https://www.kaggle.com/datasets/jessemostipak/hotel-booking-demand) ([António et al., 2019](https://doi.org/10.1016/j.dib.2018.11.126)). No Codabench competition uses it; Kaggle has many notebooks.
+#
+# | Kaggle notebook | Model and validation | Result |
 # |---|---|---|
-# | [António et al., 2019: dataset paper](https://doi.org/10.1016/j.dib.2018.11.126) | Documents the two-hotel booking datasets and variable definitions. | Source for data interpretation, not a model benchmark. |
-# | [António et al., 2017: cancellation prediction](https://scielo.pt/pdf/tms/v13n2/13n2a03.pdf) | Compares classifiers on four resort hotels; Decision Forest is strongest in accuracy, with reported results above 90%. The final assessment uses a stratified 70/30 split. | Supports comparing tree ensembles. Different hotels, features and evaluation prevent a direct score comparison. |
-# | [António et al., 2017: production prototype](https://ciencia.iscte-iul.pt/publications/predicting-hotel-bookings-cancellation-with-a-machine-learning-classification-model/44810) | Daily model training and an A/B evaluation in two hotels; reports fewer cancellations among contacted bookings. | Motivates guest follow-up. This is intervention evidence from another study, not an effect estimated from our CSV. |
+# | [marcuswingen](https://www.kaggle.com/code/marcuswingen/eda-of-bookings-and-ml-to-predict-cancelations) | random forest, 4-fold CV | accuracy 0.866 |
+# | [barathsrinath](https://www.kaggle.com/code/barathsrinath/hotel-booking-cancellation) | random forest, 4-fold CV | accuracy 0.86 |
+# | [felixign](https://www.kaggle.com/code/felixign/hotel-booking-cancellation-prediction) | XGBoost, 70/30 split | accuracy 0.85 |
+# | [sumitm004](https://www.kaggle.com/code/sumitm004/hotel-cancellations-no-leakage-eda-ml-shap) | XGBoost, 5-fold CV | accuracy 0.880, ROC AUC 0.950* |
+# | [niteshyadav3103](https://www.kaggle.com/code/niteshyadav3103/hotel-booking-prediction-99-5-acc) | uses the date the outcome was recorded | accuracy 0.995 (leakage) |
+# | **This project** | random forest, grouped split | **accuracy 0.866, ROC AUC 0.941** |
 #
-# Our contribution is the controlled comparison of four familiar models with grouped evaluation, preprocessing experiments, feature sensitivity and contact-workload analysis. We do not introduce a new algorithm or claim state-of-the-art performance.
+# \* Scores are only in the notebook's outputs, so we reran its code on the same CSV.
+#
+# **What they did.** Tree models (random forest, XGBoost) tuned for accuracy on random splits. Without columns that reveal the outcome, the best reach 0.85–0.88 accuracy.
+#
+# **What we did.** The same model families, but 27% of the rows are exact duplicates, so we keep identical bookings in the same split and CV fold. We select on ROC AUC, because the model ranks bookings for calls, and report recall per call budget.
+#
+# **Why it is different.** With duplicates kept together, the best notebook's XGBoost drops from 0.880 to 0.856 accuracy (ROC AUC 0.950 to 0.934), below our model. So the higher Kaggle scores partly come from duplicates seen in both training and validation. We also add what the notebooks don't: confidence intervals, a retrain without fields filled in after booking, and a test on 2017 bookings with a model trained on earlier ones.
 
 # %% [markdown]
 # Import the data preparation code from the `src` folder.
