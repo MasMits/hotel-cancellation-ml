@@ -1,5 +1,7 @@
 """Metrics, bootstrap intervals, contact workloads and evaluation plots."""
 
+from itertools import combinations
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -77,6 +79,27 @@ def metrics_from_proba(y, y_proba, threshold=0.5, sample_weight=None):
 def compare_proba(probas, y, threshold=0.5):
     """One row of metrics per column of a probability table."""
     return pd.DataFrame({name: metrics_from_proba(y, probas[name], threshold) for name in probas.columns}).T
+
+
+def compare_errors(probas, y, threshold=0.5):
+    """False positives/negatives and paired error overlap, aligning labels by index."""
+    target = y.reindex(probas.index)
+    predictions = probas.ge(threshold)
+    errors = predictions.ne(target, axis="index")
+    summary = pd.DataFrame({
+        "false_positives": predictions.loc[target.eq(0)].sum(),
+        "false_negatives": (~predictions.loc[target.eq(1)]).sum(),
+        "error_rate": errors.mean(),
+    })
+    pairs = pd.DataFrame([
+        {"first": first, "second": second,
+         "both_wrong": (errors[first] & errors[second]).sum(),
+         "only_first_wrong": (errors[first] & ~errors[second]).sum(),
+         "only_second_wrong": (~errors[first] & errors[second]).sum(),
+         "disagreement_share": (errors[first] != errors[second]).mean()}
+        for first, second in combinations(probas.columns, 2)
+    ])
+    return summary, pairs
 
 
 def plot_roc_pr_curves(probas, y, title=""):
@@ -205,6 +228,17 @@ def calibration_bins(y, y_proba, n_bins=10):
         bookings=("outcome", "size"), predicted=("predicted", "mean"), observed=("outcome", "mean"))
 
 
+def plot_contact_workload(table):
+    """Precision and recall for fixed validation contact budgets."""
+    _, ax = plt.subplots(figsize=(8, 5))
+    table.plot(x="contact_share", y=["precision", "recall"], marker="o", ax=ax)
+    ax.plot(table["contact_share"], table["contact_share"], "--", color="gray", label="Random selection: recall")
+    ax.set(xlabel="Share of bookings contacted", ylabel="Score", ylim=(0, 1.05),
+           title="Contact budget trade-off (validation)")
+    ax.legend()
+    show_figure(plt.gcf(), "contact_workload")
+
+
 def plot_bootstrap_difference(differences, label="AUC difference"):
     """Histogram of a bootstrap distribution with its 95% interval and zero marked."""
     low, high = np.quantile(differences, [0.025, 0.975])
@@ -217,26 +251,53 @@ def plot_bootstrap_difference(differences, label="AUC difference"):
     show_figure(plt.gcf(), "bootstrap_difference")
 
 
-def metrics_by_segment(X, y, y_proba, column, threshold=0.5, min_rows=200):
-    """Precision and recall inside each group of one column, largest groups first."""
+def recall_interval(y, prediction, groups, n_boot=1000, random_state=72):
+    """Pointwise percentile interval from resampling whole groups within one segment."""
+    positives = np.asarray(y) == 1
+    counts = pd.DataFrame({"positives": positives, "found": positives & np.asarray(prediction, dtype=bool),
+                           "group": np.asarray(groups)}).groupby("group", sort=False).sum().to_numpy()
+    rng = np.random.default_rng(random_state)
+    samples = []
+    for _ in range(n_boot):
+        total, found = counts[rng.integers(0, len(counts), len(counts))].sum(axis=0)
+        if total:
+            samples.append(found / total)
+    return np.quantile(samples, [0.025, 0.975]) if samples else np.array([np.nan, np.nan])
+
+
+def metrics_by_segment(X, y, y_proba, column, threshold=0.5, min_rows=200, groups=None):
+    """Segment precision/recall and group-bootstrap recall intervals, largest groups first."""
     data = pd.DataFrame({
         "segment": X[column].astype(str).to_numpy(),
         "y": np.asarray(y),
         "pred": (np.asarray(y_proba) >= threshold).astype(int),
+        "group": np.arange(len(y)) if groups is None else np.asarray(groups),
     })
-    rows = [{"segment": segment, "bookings": len(group), "cancel_rate": group["y"].mean(),
-             "precision": precision_score(group["y"], group["pred"], zero_division=0),
-             "recall": recall_score(group["y"], group["pred"], zero_division=0)}
-            for segment, group in data.groupby("segment") if len(group) >= min_rows]
+    rows = []
+    for segment, group in data.groupby("segment"):
+        if len(group) < min_rows:
+            continue
+        low, high = recall_interval(group["y"], group["pred"], group["group"])
+        rows.append({"segment": segment, "bookings": len(group), "cancellations": group["y"].sum(),
+                     "cancel_rate": group["y"].mean(),
+                     "precision": precision_score(group["y"], group["pred"], zero_division=0),
+                     "recall": recall_score(group["y"], group["pred"], zero_division=0),
+                     "recall_ci_low": low, "recall_ci_high": high})
     return pd.DataFrame(rows).set_index("segment").sort_values("bookings", ascending=False)
 
 
 def plot_segment_recall(tables, overall_recall):
-    """Horizontal bars of recall per segment, one panel per column."""
-    _, axes = plt.subplots(1, len(tables), figsize=(5 * len(tables), 4))
+    """Recall points and pointwise 95% group-bootstrap intervals per segment."""
+    _, axes = plt.subplots(1, len(tables), figsize=(5 * len(tables), 4.5))
     axes = np.atleast_1d(axes)
     for ax, (column, table) in zip(axes, tables.items()):
-        table["recall"].sort_values().plot.barh(ax=ax)
+        ordered = table.sort_values("recall")
+        positions = np.arange(len(ordered))
+        ax.hlines(positions, ordered["recall_ci_low"], ordered["recall_ci_high"], color="C0", linewidth=2)
+        ax.scatter(ordered["recall"], positions, label="Recall with 95% CI", zorder=3)
+        labels = [f"{segment} (canceled: {int(row.cancellations)})" for segment, row in ordered.iterrows()]
+        ax.set(yticks=positions, yticklabels=labels)
+        ax.tick_params(axis="y", labelsize=9)
         ax.axvline(overall_recall, color="gray", linestyle="--", label="Overall recall")
         ax.set(xlim=(0, 1), title=column.replace("_", " ").capitalize(), xlabel="Recall", ylabel="")
     axes[0].legend(loc="upper left", bbox_to_anchor=(0, -0.25), ncol=2)

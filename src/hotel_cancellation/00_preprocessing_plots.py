@@ -51,6 +51,44 @@ def plot_feature_patterns(train_bookings, training_features):
     return fig
 
 
+def plot_numeric_distributions(features, columns):
+    """Histograms; zoom ADR/guest axes at p99 and count the values outside the view."""
+    rows = int(np.ceil(len(columns) / 3))
+    fig, axes = plt.subplots(rows, 3, figsize=(12, 3.5 * rows), squeeze=False)
+    for ax, column in zip(axes.flat, columns):
+        values = features[column].dropna()
+        upper = values.quantile(0.99) if column in ("adr", "total_guests") else values.max()
+        zoom = values.min() < upper < values.max()
+        visible_range = (values.min(), upper) if zoom else None
+        ax.hist(values, bins=35, range=visible_range)
+        ax.set(title=column.replace("_", " "), xlabel="Value", ylabel="Bookings")
+        if zoom:
+            ax.set_xlabel("Value (up to 99th percentile)")
+            ax.text(0.98, 0.95, f"{(values > upper).sum():,} values above axis\nmax = {values.max():g}",
+                    transform=ax.transAxes, ha="right", va="top", fontsize=9)
+    for ax in axes.flat[len(columns):]:
+        ax.set_visible(False)
+    return fig
+
+
+def plot_numeric_correlations(features, target, columns):
+    """Pearson correlations of selected inputs and the index-aligned target."""
+    correlations = features[columns].assign(is_canceled=target).corr()
+    labels = correlations.columns.str.replace("_", " ")
+    fig, ax = plt.subplots(figsize=(11, 9))
+    heatmap = ax.imshow(correlations, cmap="RdBu_r", vmin=-1, vmax=1)
+    ax.set(xticks=range(len(labels)), yticks=range(len(labels)),
+           xticklabels=labels, yticklabels=labels, title="Numeric correlations (train)")
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", fontsize=9)
+    for row in range(len(labels)):
+        for column in range(len(labels)):
+            value = correlations.iloc[row, column]
+            ax.text(column, row, f"{value:.2f}", ha="center", va="center",
+                    color="white" if abs(value) > 0.6 else "black", fontsize=8)
+    fig.colorbar(heatmap, ax=ax, label="Pearson correlation")
+    return fig
+
+
 def plot_experiment_results(results_table):
     fig, (f1_ax, size_ax) = plt.subplots(1, 2, figsize=(13, 5))
     order = results_table["experiment"].unique()

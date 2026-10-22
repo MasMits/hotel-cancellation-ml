@@ -121,6 +121,19 @@ def quality_flags(features, bookings):
     })
 
 
+def feature_overview(features):
+    """Describe every input column; count the missing-category marker as missing."""
+    missing = features.isna() | features.eq("Unknown")
+    overview = pd.DataFrame({
+        "dtype": features.dtypes.astype(str),
+        "missing": missing.sum(),
+        "missing_pct": missing.mean() * 100,
+        "unique": features.nunique(),
+    })
+    numeric = features.select_dtypes(include="number")
+    return overview.join(numeric.agg(["min", "median", "max"]).T)
+
+
 def log_lead_time(features):
     """Return a copy with lead_time replaced by ln(1 + lead_time)."""
     if features["lead_time"].lt(0).any():

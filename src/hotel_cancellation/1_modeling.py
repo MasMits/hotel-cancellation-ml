@@ -1,14 +1,15 @@
 """Baseline pipelines and compact reporting for the grouped parameter searches."""
 
+from pathlib import Path
+
+import joblib
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
-from sklearn.datasets import make_moons
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import make_pipeline
-from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.tree import DecisionTreeClassifier
 
 from hotel_cancellation.plot_style import show_figure
 
@@ -102,13 +103,36 @@ def configuration_label(model):
             f"rate={classifier.learning_rate}, features={classifier.max_features or 'all'}")
 
 
-def plot_tree_levels(model, max_depth=2):
-    """First levels of a fitted tree pipeline."""
-    fig, ax = plt.subplots(figsize=(18, 7))
-    plot_tree(model[-1], feature_names=model[:-1].get_feature_names_out(), class_names=["Not canceled", "Canceled"],
-              filled=True, rounded=True, max_depth=max_depth, fontsize=10, ax=ax)
-    ax.set_title(f"Decision tree: first {max_depth + 1} levels")
-    show_figure(fig, "decision_tree")
+def feature_importance_table(models, top=10):
+    """Top encoded inputs by absolute LR coefficient or tree impurity importance."""
+    tables = []
+    for name, model in models.items():
+        classifier = model[-1]
+        linear = isinstance(classifier, LogisticRegression)
+        values = classifier.coef_[0] if linear else classifier.feature_importances_
+        table = pd.DataFrame({"feature": model[:-1].get_feature_names_out(), "value": values})
+        table = table.loc[table["value"].abs().nlargest(top).index]
+        table.insert(0, "model", name)
+        table["measure"] = "coefficient" if linear else "impurity importance"
+        tables.append(table)
+    return pd.concat(tables, ignore_index=True)
+
+
+def save_experiments(folder, models, searches, cv_results, probabilities, target, metadata):
+    """Save available fitted models, CV/search traces and indexed validation predictions."""
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    joblib.dump({
+        "models": models,
+        "baseline_cv_results": cv_results,
+        "search_cv_results": {name: search.cv_results_ for name, search in searches.items()},
+        "search_best_params": {name: search.best_params_ for name, search in searches.items()},
+        "metadata": metadata,
+    }, folder / "experiments.joblib", compress=3)
+    predictions = probabilities.copy()
+    predictions.insert(0, "is_canceled", target.reindex(predictions.index))
+    predictions.to_csv(folder / "validation_predictions.csv", index_label="row_index")
+
 
 def plot_forest_search(cv_results):
     """Compare train/CV AUC for depth and leaf size within each grouping variant."""
@@ -119,12 +143,12 @@ def plot_forest_search(cv_results):
     fig, axes = plt.subplots(1, 2, figsize=(15, 6), sharey=True)
     for ax, rare, title in zip(axes, [None, 50], ["No rare grouping", "Rare categories grouped"]):
         mask = results[rare_key].isna() if rare is None else results[rare_key].eq(rare)
-        for leaf in [5, 10]:
+        for leaf in sorted(results[leaf_key].astype(int).unique()):
             subset = results[mask & results[leaf_key].eq(leaf)].sort_values(depth_key)
             depths = subset[depth_key].astype(int)
             (cv_line,) = ax.plot(depths, subset.mean_test_roc_auc, marker="o", label=f"CV, leaf >= {leaf}")
             ax.plot(depths, subset.mean_train_roc_auc, "--", color=cv_line.get_color(), label=f"Train, leaf >= {leaf}")
-        ax.set(title=title, xlabel="Maximum tree depth", xticks=[12, 24])
+        ax.set(title=title, xlabel="Maximum tree depth", xticks=sorted(results[depth_key].astype(int).unique()))
         ax.legend(fontsize=9)
     axes[0].set_ylabel("ROC AUC")
     show_figure(fig, "forest_complexity")
