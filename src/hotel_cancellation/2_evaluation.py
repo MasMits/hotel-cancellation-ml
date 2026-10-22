@@ -83,7 +83,12 @@ def compare_proba(probas, y, threshold=0.5):
 
 def compare_errors(probas, y, threshold=0.5):
     """False positives/negatives and paired error overlap, aligning labels by index."""
+    if (not probas.index.is_unique or not y.index.is_unique
+            or len(probas) != len(y) or not probas.index.isin(y.index).all()):
+        raise ValueError("Probabilities and target must have the same unique row indices.")
     target = y.reindex(probas.index)
+    if target.isna().any():
+        raise ValueError("Target labels must not be missing.")
     predictions = probas.ge(threshold)
     errors = predictions.ne(target, axis="index")
     summary = pd.DataFrame({

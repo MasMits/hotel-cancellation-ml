@@ -118,8 +118,34 @@ def feature_importance_table(models, top=10):
     return pd.concat(tables, ignore_index=True)
 
 
+def plot_feature_importance(table):
+    """Plot the encoded-input table with independent scales and signed LR coefficients."""
+    names = table["model"].unique()
+    fig, axes = plt.subplots((len(names) + 1) // 2, 2, figsize=(16, 5.5 * ((len(names) + 1) // 2)),
+                             squeeze=False)
+    for ax, name in zip(axes.flat, names):
+        values = table.loc[table["model"].eq(name)].copy()
+        values = values.loc[values["value"].abs().sort_values().index]
+        labels = values["feature"].str.replace("numeric__", "", regex=False).str.replace("categorical__", "", regex=False)
+        colors = ["C3" if value < 0 else "C0" for value in values["value"]]
+        ax.barh(labels, values["value"], color=colors)
+        ax.axvline(0, color="gray", linewidth=0.8)
+        measure = "Signed coefficient" if values["measure"].iloc[0] == "coefficient" else "Impurity importance"
+        ax.set(title=name, xlabel=measure)
+        ax.tick_params(axis="y", labelsize=9)
+    for ax in axes.flat[len(names):]:
+        ax.set_visible(False)
+    show_figure(fig, "encoded_feature_importance")
+
+
 def save_experiments(folder, models, searches, cv_results, probabilities, target, metadata):
     """Save available fitted models, CV/search traces and indexed validation predictions."""
+    if (not probabilities.index.is_unique or not target.index.is_unique
+            or len(probabilities) != len(target) or not probabilities.index.isin(target.index).all()):
+        raise ValueError("Probabilities and target must have the same unique row indices.")
+    target = target.reindex(probabilities.index)
+    if target.isna().any():
+        raise ValueError("Target labels must not be missing.")
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     joblib.dump({
@@ -130,7 +156,7 @@ def save_experiments(folder, models, searches, cv_results, probabilities, target
         "metadata": metadata,
     }, folder / "experiments.joblib", compress=3)
     predictions = probabilities.copy()
-    predictions.insert(0, "is_canceled", target.reindex(predictions.index))
+    predictions.insert(0, "is_canceled", target)
     predictions.to_csv(folder / "validation_predictions.csv", index_label="row_index")
 
 
