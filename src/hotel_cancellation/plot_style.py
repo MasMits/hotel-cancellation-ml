@@ -1,4 +1,4 @@
-"""Common figure settings and PNG export for the slides."""
+"""Shared plot settings and PNG export."""
 
 from pathlib import Path
 
@@ -9,7 +9,7 @@ STYLE = {"axes.spines.top": False, "axes.spines.right": False, "axes.titleweight
 
 
 def show_figure(figure, name):
-    """Save the figure to reports/figures (for the slides) and display it."""
+    """Save a PNG in reports/figures and display the figure."""
     FIGURE_FOLDER.mkdir(parents=True, exist_ok=True)
     figure.tight_layout()
     figure.savefig(FIGURE_FOLDER / f"{name}.png", dpi=200, bbox_inches="tight")

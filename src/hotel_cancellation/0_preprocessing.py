@@ -1,4 +1,4 @@
-"""Feature preparation, grouped splits and fitted preprocessing pipelines."""
+"""Feature preparation and grouped data splits."""
 
 from calendar import month_name
 from pathlib import Path
@@ -15,8 +15,7 @@ from sklearn.utils.validation import check_is_fitted
 
 DATA_PATH = Path(__file__).resolve().parents[2] / "data/raw/hotel_bookings.csv"
 
-# Group on the same inputs even when these fields are omitted in an experiment.
-# This affects only the split key, not the features passed to the model.
+# Exclude ablation fields so group keys remain unchanged when those fields are removed.
 GROUPING_EXCLUDED_COLUMNS = ["assigned_room_type", "booking_changes", "days_in_waiting_list", "adr", "deposit_type"]
 RARE_CATEGORY_COLUMNS = ["agent", "company", "country"]
 MONTH_NUMBERS = {name: number for number, name in enumerate(month_name) if name}
@@ -45,12 +44,12 @@ def prepare_features(df):
 
 
 def booking_groups(features):
-    """Feature-only key shared by the outer split, CV and cluster bootstrap."""
+    """Hash predictor values to group repeated inputs across splits and bootstrap samples."""
     return pd.util.hash_pandas_object(features.drop(columns=GROUPING_EXCLUDED_COLUMNS), index=False)
 
 
 def grouped_cv(features, target, n_splits=3, random_state=72):
-    """Materialize common folds once, after choosing the training row order."""
+    """Create stratified grouped folds in the current row order."""
     groups = booking_groups(features)
     splitter = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
     folds = list(splitter.split(features, target, groups))
@@ -63,7 +62,7 @@ def split_data(features, target, random_state=72):
     """Return train/validation/test pairs, keeping identical feature groups together."""
     groups = booking_groups(features)
 
-    # 20% test, then 25% of the remaining 80% (20% overall) for validation.
+    # Reserve 20% of groups for test, then 25% of the remaining groups for validation.
     development_rows, test_rows = next(
         GroupShuffleSplit(n_splits=1, test_size=0.20, random_state=random_state).split(features, groups=groups))
     train_positions, validation_positions = next(
@@ -83,7 +82,7 @@ def split_data(features, target, random_state=72):
 
 
 def arrival_dates(bookings):
-    """Arrival date of each booking, built from the year, month-name and day columns."""
+    """Build arrival dates from year, month and day."""
     return pd.to_datetime({
         "year": bookings["arrival_date_year"],
         "month": bookings["arrival_date_month"].map(MONTH_NUMBERS),
@@ -112,7 +111,7 @@ def temporal_split(bookings, features, target):
 
 
 def quality_flags(features, bookings):
-    """Boolean flags for unusual rows; bookings are the raw rows with the same index."""
+    """Flag unusual rows using features and raw bookings with matching indices."""
     return pd.DataFrame({
         "negative_adr": features["adr"].lt(0),
         "zero_guests": features["total_guests"].eq(0),
@@ -122,7 +121,7 @@ def quality_flags(features, bookings):
 
 
 def feature_overview(features):
-    """Describe every input column; count the missing-category marker as missing."""
+    """Summarize each feature, counting Unknown as missing."""
     missing = features.isna() | features.eq("Unknown")
     overview = pd.DataFrame({
         "dtype": features.dtypes.astype(str),
@@ -144,9 +143,7 @@ def log_lead_time(features):
 
 
 class RareCategoryGrouper(TransformerMixin, BaseEstimator):
-    """Remember frequent categories in fit; replace other values in transform.
-
-    The sklearn base classes let this step run inside a Pipeline.
+    """Learn frequent categories on train and replace other values with Other.
     """
 
     def __init__(self, min_count=50):
@@ -171,12 +168,11 @@ class RareCategoryGrouper(TransformerMixin, BaseEstimator):
         return features
 
     def get_feature_names_out(self, input_features=None):
-        # Grouping changes values, but keeps the same columns.
         return self.feature_names_in_.copy()
 
 
 def build_preprocessor(rare_min_count=None, log_lead=False):
-    """Build separate numerical and categorical pipelines, fitted by the model."""
+    """Build numeric and categorical preprocessing pipelines."""
     log_step = [("log_lead", FunctionTransformer(log_lead_time, validate=False, feature_names_out="one-to-one"))]
     numeric_steps = (log_step if log_lead else []) + [
         ("imputer", SimpleImputer(strategy="median")),

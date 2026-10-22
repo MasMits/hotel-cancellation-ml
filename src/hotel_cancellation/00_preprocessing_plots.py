@@ -1,4 +1,4 @@
-"""Figures for the preprocessing section of the notebook."""
+"""Preprocessing plots."""
 
 from importlib import import_module
 
@@ -11,7 +11,7 @@ WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
 def cancellation_bars(ax, summary, title, **labels):
-    """Cancellation rate per group (summary has columns size and mean), group size above each bar."""
+    """Plot cancellation rates and booking counts from the size and mean columns."""
     ax.bar(summary.index.astype(str), summary["mean"] * 100)
     for x, row in enumerate(summary.itertuples()):
         ax.text(x, row.mean * 100 + 1, f"{row.size:,}", ha="center", fontsize=9)
@@ -52,7 +52,7 @@ def plot_feature_patterns(train_bookings, training_features):
 
 
 def plot_numeric_distributions(features, columns):
-    """Histograms; zoom ADR/guest axes at p99 and count the values outside the view."""
+    """Plot numeric histograms, zooming ADR and guest axes at the 99th percentile."""
     rows = int(np.ceil(len(columns) / 3))
     fig, axes = plt.subplots(rows, 3, figsize=(12, 3.5 * rows), squeeze=False)
     for ax, column in zip(axes.flat, columns):
@@ -72,7 +72,7 @@ def plot_numeric_distributions(features, columns):
 
 
 def plot_numeric_correlations(features, target, columns):
-    """Pearson correlations of selected inputs and the index-aligned target."""
+    """Plot Pearson correlations between selected features and the target."""
     correlations = features[columns].assign(is_canceled=target).corr()
     labels = correlations.columns.str.replace("_", " ")
     fig, ax = plt.subplots(figsize=(11, 9))

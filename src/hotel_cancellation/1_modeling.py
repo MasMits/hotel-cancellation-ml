@@ -1,4 +1,4 @@
-"""Baseline pipelines and compact reporting for the grouped parameter searches."""
+"""Model pipelines, parameter searches and reporting."""
 
 from pathlib import Path
 
@@ -27,7 +27,6 @@ def train_decision_tree(X_train, y_train, preprocessor, max_depth=8, min_samples
 
 def train_random_forest(X_train, y_train, preprocessor, n_estimators=100,
                         max_depth=12, min_samples_leaf=10, random_state=72):
-    # n_jobs=-1 uses every CPU core; with a fixed random_state the fitted forest is the same.
     classifier = RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth,
                                         min_samples_leaf=min_samples_leaf, random_state=random_state, n_jobs=-1)
     return make_pipeline(preprocessor, classifier).fit(X_train, y_train)
@@ -42,7 +41,7 @@ def train_gradient_boosting(X_train, y_train, preprocessor, n_estimators=60, lea
 
 
 def grouped_grid_search(model, grid, X, y, folds):
-    """Grid search on fixed grouped folds; refit the configuration with the best mean ROC AUC."""
+    """Tune on fixed folds and refit the model with the best CV ROC AUC."""
     return GridSearchCV(
         model, grid, scoring={"roc_auc": "roc_auc", "f1": "f1", "neg_log_loss": "neg_log_loss"},
         refit="roc_auc", cv=folds, n_jobs=1, return_train_score=True,
@@ -50,7 +49,7 @@ def grouped_grid_search(model, grid, X, y, folds):
 
 
 def search_summary(searches):
-    """Train and CV scores of each search's selected configuration, with the train-CV ROC AUC gap."""
+    """Summarize the selected models' train and CV scores."""
     best_scores = {"train_auc": "mean_train_roc_auc", "cv_auc": "mean_test_roc_auc",
                    "cv_auc_std": "std_test_roc_auc", "cv_f1_at_0.5": "mean_test_f1"}
     summary = pd.DataFrame([
@@ -63,7 +62,7 @@ def search_summary(searches):
 
 
 def search_space_table(grids):
-    """Describe the actual grids without printing estimator objects or long dictionaries."""
+    """List parameter values and their role in each search."""
     reasons = {
         "columntransformer": "Lead-time transformation", "C": "Regularization strength",
         "class_weight": "Class weighting", "max_depth": "Tree complexity",
@@ -88,7 +87,7 @@ def search_space_table(grids):
 
 
 def configuration_label(model):
-    """Short, explicit description of a fitted pipeline's selected configuration."""
+    """Summarize a fitted model's settings."""
     classifier = model[-1]
     if isinstance(classifier, LogisticRegression):
         lead = "log lead" if "log_lead" in model[0].named_transformers_["numeric"].named_steps else "raw lead"
@@ -104,7 +103,7 @@ def configuration_label(model):
 
 
 def feature_importance_table(models, top=10):
-    """Top encoded inputs by absolute LR coefficient or tree impurity importance."""
+    """Rank encoded features by absolute LR coefficient or tree impurity importance."""
     tables = []
     for name, model in models.items():
         classifier = model[-1]
@@ -119,7 +118,7 @@ def feature_importance_table(models, top=10):
 
 
 def plot_feature_importance(table):
-    """Plot the encoded-input table with independent scales and signed LR coefficients."""
+    """Plot each model's top features, preserving LR coefficient signs."""
     names = table["model"].unique()
     fig, axes = plt.subplots((len(names) + 1) // 2, 2, figsize=(16, 5.5 * ((len(names) + 1) // 2)),
                              squeeze=False)
@@ -139,7 +138,7 @@ def plot_feature_importance(table):
 
 
 def save_experiments(folder, models, searches, cv_results, probabilities, target, metadata):
-    """Save available fitted models, CV/search traces and indexed validation predictions."""
+    """Save fitted models, CV results and row-indexed validation predictions."""
     if (not probabilities.index.is_unique or not target.index.is_unique
             or len(probabilities) != len(target) or not probabilities.index.isin(target.index).all()):
         raise ValueError("Probabilities and target must have the same unique row indices.")
@@ -161,7 +160,7 @@ def save_experiments(folder, models, searches, cv_results, probabilities, target
 
 
 def plot_forest_search(cv_results):
-    """Compare train/CV AUC for depth and leaf size within each grouping variant."""
+    """Plot train and CV AUC across tree depths, leaf sizes and grouping variants."""
     results = pd.DataFrame(cv_results)
     rare_key = "param_columntransformer__categorical__rare_categories__min_count"
     depth_key = "param_randomforestclassifier__max_depth"

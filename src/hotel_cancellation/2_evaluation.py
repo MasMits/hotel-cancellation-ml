@@ -1,4 +1,4 @@
-"""Metrics, bootstrap intervals, contact workloads and evaluation plots."""
+"""Evaluation metrics, bootstrap intervals and diagnostic plots."""
 
 from itertools import combinations
 
@@ -25,12 +25,12 @@ from hotel_cancellation.plot_style import show_figure
 
 
 def positive_proba(model, X):
-    """Predicted probability of the positive class (canceled)."""
+    """Return cancellation probabilities."""
     return model.predict_proba(X)[:, 1]
 
 
 def get_metrics(model, X, y):
-    """Return the main classification metrics of a model on one dataset."""
+    """Calculate classification metrics using the model's default decision rule."""
     y_pred = model.predict(X)
     accuracy = accuracy_score(y, y_pred)
     return {
@@ -44,7 +44,7 @@ def get_metrics(model, X, y):
 
 
 def summarize_cv(cv_results, metrics):
-    """Mean and standard deviation of each metric across folds, one row per model."""
+    """Summarize each model's CV metric means and standard deviations."""
     return pd.DataFrame([
         {"model": name, **{f"{metric}_{stat}": getattr(np, stat)(scores[f"test_{metric}"])
                            for metric in metrics for stat in ("mean", "std")}}
@@ -62,7 +62,7 @@ def plot_confusion_matrix(model, X, y, title="Confusion matrix", threshold=None)
 
 
 def metrics_from_proba(y, y_proba, threshold=0.5, sample_weight=None):
-    """Return the main metrics when bookings with probability >= threshold are flagged as canceled."""
+    """Calculate metrics at the specified probability threshold."""
     y_pred = (np.asarray(y_proba) >= threshold).astype(int)
     return {
         "accuracy": accuracy_score(y, y_pred, sample_weight=sample_weight),
@@ -77,12 +77,12 @@ def metrics_from_proba(y, y_proba, threshold=0.5, sample_weight=None):
 
 
 def compare_proba(probas, y, threshold=0.5):
-    """One row of metrics per column of a probability table."""
+    """Compare metrics for the models in the probability table."""
     return pd.DataFrame({name: metrics_from_proba(y, probas[name], threshold) for name in probas.columns}).T
 
 
 def compare_errors(probas, y, threshold=0.5):
-    """False positives/negatives and paired error overlap, aligning labels by index."""
+    """Compare false positives, false negatives and shared errors by row index."""
     if (not probas.index.is_unique or not y.index.is_unique
             or len(probas) != len(y) or not probas.index.isin(y.index).all()):
         raise ValueError("Probabilities and target must have the same unique row indices.")
@@ -108,7 +108,7 @@ def compare_errors(probas, y, threshold=0.5):
 
 
 def plot_roc_pr_curves(probas, y, title=""):
-    """ROC curve (left) and precision-recall curve (right) for every column of a probability table."""
+    """Plot ROC and precision-recall curves for each model."""
     _, (ax_roc, ax_pr) = plt.subplots(1, 2, figsize=(15, 6))
     for name in probas.columns:
         RocCurveDisplay.from_predictions(y, probas[name], name=name, ax=ax_roc)
@@ -140,7 +140,7 @@ def threshold_table(y, y_proba, thresholds=None):
 
 
 def plot_threshold_curves(table, marked=None, title="Metrics against threshold"):
-    """Plot precision, recall and F1 against the threshold, with chosen thresholds as vertical lines."""
+    """Plot precision, recall and F1 across thresholds, marking selected values."""
     _, ax = plt.subplots(figsize=(11, 6))
     table[["precision", "recall", "f1"]].plot(ax=ax)
     for label, threshold in (marked or {}).items():
@@ -151,7 +151,7 @@ def plot_threshold_curves(table, marked=None, title="Metrics against threshold")
 
 
 def plot_calibration(probas, y, n_bins=10, title="Calibration"):
-    """Reliability diagram: predicted probability against the observed share of cancellations."""
+    """Plot predicted risk against observed cancellation rates."""
     _, ax = plt.subplots(figsize=(9, 7))
     for name in probas.columns:
         observed, predicted = calibration_curve(y, probas[name], n_bins=n_bins)
@@ -164,7 +164,7 @@ def plot_calibration(probas, y, n_bins=10, title="Calibration"):
 
 
 def _bootstrap_weights(y, groups, n_boot, random_state):
-    """Resample whole groups; weights exactly represent repeated group draws."""
+    """Generate row weights by resampling whole groups."""
     if groups is None:
         groups = np.arange(len(y))
     if len(groups) != len(y):
@@ -204,9 +204,9 @@ def bootstrap_auc_difference(y, proba_a, proba_b, n_boot=1000, random_state=72, 
 
 
 def contact_workload(y, y_proba, shares=(0.1, 0.2, 0.3, 0.4, 0.5)):
-    """Rank by risk and evaluate illustrative contact budgets, not business targets.
+    """Evaluate precision and recall at fixed contact budgets.
 
-    Stable input order breaks equal-score ties without looking at outcomes.
+    Break equal-score ties by input order.
     """
     y = np.asarray(y)
     ranking = np.argsort(-np.asarray(y_proba), kind="stable")
@@ -226,7 +226,7 @@ def contact_workload(y, y_proba, shares=(0.1, 0.2, 0.3, 0.4, 0.5)):
 
 
 def calibration_bins(y, y_proba, n_bins=10):
-    """Reliability estimates with bin counts; no claim of universal calibration."""
+    """Summarize predicted risk, observed cancellation rates and counts by bin."""
     table = pd.DataFrame({"outcome": np.asarray(y), "predicted": np.asarray(y_proba)})
     table["bin"] = pd.cut(table.predicted, np.linspace(0, 1, n_bins + 1), include_lowest=True)
     return table.groupby("bin", observed=True).agg(
@@ -271,7 +271,7 @@ def recall_interval(y, prediction, groups, n_boot=1000, random_state=72):
 
 
 def metrics_by_segment(X, y, y_proba, column, threshold=0.5, min_rows=200, groups=None):
-    """Segment precision/recall and group-bootstrap recall intervals, largest groups first."""
+    """Summarize segment metrics and group-bootstrap recall intervals."""
     data = pd.DataFrame({
         "segment": X[column].astype(str).to_numpy(),
         "y": np.asarray(y),
@@ -310,7 +310,7 @@ def plot_segment_recall(tables, overall_recall):
 
 
 def plot_permutation_importance(model, X, y, n_repeats=5, top=15, sample=5000, random_state=72):
-    """Drop in ROC AUC when one original column is shuffled, measured on (a sample of) the given data."""
+    """Measure ROC AUC loss when each original feature is shuffled."""
     if sample is not None and len(X) > sample:
         X = X.sample(sample, random_state=random_state)
         y = y.loc[X.index]
